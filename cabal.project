@@ -1,0 +1,7 @@
+packages: .
+
+with-compiler: ghc-9.14.1
+
+semaphore: True
+
+jobs: $ncpus

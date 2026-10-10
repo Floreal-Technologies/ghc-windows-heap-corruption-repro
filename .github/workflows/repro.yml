@@ -1,0 +1,136 @@
+name: Heap corruption repro
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Clean builds per variant
+        default: '30'
+
+jobs:
+  repro:
+    name: ${{ matrix.label }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: glib, internal interpreter
+            flags: '+glib -pkgconfig -gi -external'
+            pageheap: false
+          - label: glib, external interpreter
+            flags: '+glib -pkgconfig -gi +external'
+            pageheap: false
+          - label: glib + pkgconfig, internal interpreter
+            flags: '+glib +pkgconfig -gi -external'
+            pageheap: false
+          - label: glib + pkgconfig + gi, internal interpreter
+            flags: '+glib +pkgconfig +gi -external'
+            pageheap: false
+          - label: glib + pkgconfig + gi, external interpreter
+            flags: '+glib +pkgconfig +gi +external'
+            pageheap: false
+          - label: glib + pkgconfig + gi, internal interpreter, page heap
+            flags: '+glib +pkgconfig +gi -external'
+            pageheap: true
+    steps:
+      - name: Keep the line endings the repository uses
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v7
+
+      - name: Set up Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.14.1'
+
+      - name: Install the GTK stack into GHCup's MSYS2
+        shell: pwsh
+        run: |
+          $msys = if ($env:GHCUP_MSYS2) { $env:GHCUP_MSYS2 } else { 'C:\msys64' }
+          $pacman = "$msys\usr\bin\pacman.exe"
+          if (-not (Test-Path $pacman)) { throw "no pacman at $pacman" }
+          & $pacman -S --noconfirm --needed `
+            mingw-w64-ucrt-x86_64-gtk4 `
+            mingw-w64-ucrt-x86_64-libadwaita `
+            mingw-w64-ucrt-x86_64-pkgconf `
+            mingw-w64-ucrt-x86_64-gobject-introspection
+          if ($LASTEXITCODE -ne 0) { throw "pacman failed with $LASTEXITCODE" }
+          & $pacman -Q
+
+      - name: Configure environment
+        shell: pwsh
+        run: |
+          $msys = if ($env:GHCUP_MSYS2) { $env:GHCUP_MSYS2 } else { 'C:\msys64' }
+          $ucrt = "$msys\ucrt64"
+          "$ucrt\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "UCRT=$ucrt" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$ucrt\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "XDG_DATA_DIRS=$ucrt\share" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Save crash dumps
+        shell: pwsh
+        run: |
+          $folder = "$env:RUNNER_TEMP\wer-dumps"
+          New-Item -ItemType Directory -Force -Path $folder | Out-Null
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Force -Path $key | Out-Null
+          New-ItemProperty -Force -Path $key -Name DumpFolder -PropertyType ExpandString -Value $folder | Out-Null
+          New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 2 | Out-Null
+          New-ItemProperty -Force -Path $key -Name DumpCount -PropertyType DWord -Value 20 | Out-Null
+          "DUMP_FOLDER=$folder" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Turn on full page heap for ghc.exe
+        if: matrix.pageheap
+        shell: pwsh
+        run: |
+          $gflags = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe'
+          if (-not (Test-Path $gflags)) { throw "no gflags at $gflags" }
+          & $gflags /p /enable ghc.exe /full
+          & $gflags /p
+
+      - name: Versions
+        shell: pwsh
+        run: |
+          ghc --version
+          cabal --version
+          ghc --info | Select-String 'RTS ways|Have interpreter|target platform'
+          Get-Command glib-compile-resources, pkg-config | Format-Table Name, Source
+          pkg-config --modversion gtk4 libadwaita-1 glib-2.0
+
+      - name: Build in a loop
+        shell: pwsh
+        run: |
+          cabal update
+          ./scripts/loop.ps1 `
+            -Iterations ${{ inputs.iterations || '30' }} `
+            -Flags '${{ matrix.flags }}' `
+            -Label '${{ matrix.label }}' `
+            -Ucrt $env:UCRT `
+            -DumpFolder $env:DUMP_FOLDER
+
+      - name: Analyse crash dumps
+        if: failure()
+        shell: pwsh
+        run: |
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          $dumps = @(Get-ChildItem -Recurse -Path dumps, $env:DUMP_FOLDER -Filter *.dmp -ErrorAction SilentlyContinue)
+          Write-Host "$($dumps.Count) dump(s)"
+          if (-not (Test-Path $cdb)) { Write-Host "no cdb at $cdb"; exit 0 }
+          foreach ($dump in $dumps) {
+            Write-Host "===== $($dump.FullName)"
+            & $cdb -z $dump.FullName -y 'srv*C:\symbols*https://msdl.microsoft.com/download/symbols' `
+              -c '.ecxr; !analyze -v; ~*kn 40; lm; q'
+          }
+
+      - name: Upload crash dumps
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dumps-${{ strategy.job-index }}
+          path: |
+            dumps/
+            ${{ env.DUMP_FOLDER }}
+          if-no-files-found: ignore

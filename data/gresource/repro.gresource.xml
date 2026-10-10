@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/repro/icons/scalable/apps">
+    <file>repro.svg</file>
+    <file>repro-symbolic.svg</file>
+  </gresource>
+</gresources>
