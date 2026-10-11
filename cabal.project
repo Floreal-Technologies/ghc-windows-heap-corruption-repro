@@ -1,4 +1,4 @@
-packages: .
+packages: . th/
 
 with-compiler: ghc-9.14.1
 
