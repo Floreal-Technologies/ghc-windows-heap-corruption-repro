@@ -1,12 +1,10 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE TemplateHaskellQuotes #-}
 
 module Splice (compiledBundle) where
 
 import Data.ByteString qualified as BS
-import Data.ByteString.Internal (unsafePackLenLiteral)
-import Language.Haskell.TH (Exp, Q, integerL, litE, stringPrimL)
-import Language.Haskell.TH.Syntax (addDependentFile, makeRelativeToProject)
+import Language.Haskell.TH (Exp, Q)
+import Language.Haskell.TH.Syntax (addDependentFile, lift, makeRelativeToProject)
 #if defined(GLIB)
 import Control.Monad (forM_)
 import Language.Haskell.TH.Syntax (runIO)
@@ -29,8 +27,7 @@ compiledBundle :: FilePath -> Q Exp
 compiledBundle relative = do
   manifest <- makeRelativeToProject relative
   addDependentFile manifest
-  bundle <- produce manifest
-  [|unsafePackLenLiteral $(litE (integerL (fromIntegral (BS.length bundle)))) $(litE (stringPrimL (BS.unpack bundle)))|]
+  produce manifest >>= lift
 
 produce :: FilePath -> Q BS.ByteString
 #if defined(GLIB)

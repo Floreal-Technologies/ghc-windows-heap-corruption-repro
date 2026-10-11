@@ -16,6 +16,9 @@ $heapCorruption = '-1073740940'
 package repro
   flags: $Flags
 
+package repro-th
+  flags: $Flags
+
 semaphore: $Semaphore
 jobs: $Jobs
 "@ | Out-File -FilePath cabal.project.local -Encoding utf8

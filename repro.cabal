@@ -2,25 +2,6 @@ cabal-version: 3.4
 name: repro
 version: 0
 build-type: Simple
-extra-source-files:
-  data/manifest.txt
-  data/gresource/*.svg
-  data/gresource/repro.gresource.xml
-
-flag run-io
-  description: The splice runs IO through runIO
-  default: True
-  manual: True
-
-flag spawn
-  description: The splice IO spawns processes (needs run-io)
-  default: True
-  manual: True
-
-flag glib
-  description: The splice runs glib-compile-resources, as mediacopy3000 does (overrides run-io and spawn)
-  default: False
-  manual: True
 
 flag pkgconfig
   description: The library has pkgconfig-depends on gtk4 and libadwaita-1
@@ -32,11 +13,6 @@ flag gi
   default: False
   manual: True
 
-flag external
-  description: Run the splice in the external interpreter
-  default: False
-  manual: True
-
 common options
   default-language: GHC2024
   ghc-options: -Wall
@@ -45,44 +21,26 @@ library
   import: options
   hs-source-dirs: src
   exposed-modules:
-    Embedded
     Filler.A
     Filler.B
     Filler.C
     Filler.D
     Filler.E
     Filler.F
-    Splice
 
   build-depends:
     base,
-    bytestring,
-    directory,
-    filepath,
-    process,
-    template-haskell,
-
-  if flag(run-io)
-    cpp-options: -DRUN_IO
-
-  if flag(spawn)
-    cpp-options: -DSPAWN
-
-  if flag(glib)
-    cpp-options: -DGLIB
 
   if flag(pkgconfig)
     pkgconfig-depends: gtk4, libadwaita-1
 
   if flag(gi)
-    cpp-options: -DWITH_GI
+    exposed-modules: Resources
     build-depends:
       gi-gio,
       gi-glib,
       haskell-gi-base,
-
-  if flag(external)
-    ghc-options: -fexternal-interpreter
+      repro-th,
 
 executable repro
   import: options
@@ -92,3 +50,4 @@ executable repro
     base,
     bytestring,
     repro,
+    repro-th,
